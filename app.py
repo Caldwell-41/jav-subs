@@ -1,6 +1,6 @@
 import os
 import threading
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template
 
 from downloader import (
     scan_videos,
@@ -9,11 +9,16 @@ from downloader import (
 
 app = Flask(__name__)
 
+# Global status shared with UI
 CURRENT_STATUS = {
     "videos": [],
     "finished": True
 }
 
+
+# ------------------------------------------------------------
+# Process a single video (UI-friendly wrapper)
+# ------------------------------------------------------------
 def process_single_video(video):
     # Skip if subtitle already exists
     if video.get("has_sub"):
@@ -30,23 +35,31 @@ def process_single_video(video):
 
     video["log"].append(f"Searching SubtitleCat for {code}...")
 
-    sub = download_subtitle_from_subtitlecat(code)
+    result = download_subtitle_from_subtitlecat(code)
 
-    if not sub:
+    if not result:
         video["log"].append("No subtitle found.")
         return False
 
+    # Log metadata from downloader
+    if "title" in result:
+        video["log"].append(f"Found subtitle: {result['title']}")
+    if "source" in result:
+        video["log"].append(f"Source: {result['source']}")
+
+    # Save as .en.srt
     srt_path = os.path.splitext(file)[0] + ".en.srt"
 
     try:
         with open(srt_path, "wb") as f:
-            f.write(sub)
+            f.write(result["bytes"])
     except Exception as e:
         video["log"].append(f"Failed to save subtitle: {e}")
         return False
 
     video["log"].append(f"Saved to {srt_path}")
     return True
+
 
 # ------------------------------------------------------------
 # Routes
@@ -59,12 +72,9 @@ def index():
 
 @app.route("/scan")
 def scan():
-    """
-    Scans the directory and returns the list of videos.
-    """
     global CURRENT_STATUS
 
-    # Change this to your actual video directory
+    # Update this to your real directory
     VIDEO_DIR = "/videos"
 
     videos = scan_videos(VIDEO_DIR, include_existing=True)
@@ -88,9 +98,6 @@ def scan():
 
 @app.route("/download", methods=["POST"])
 def download():
-    """
-    Starts background download thread.
-    """
     global CURRENT_STATUS
     CURRENT_STATUS["finished"] = False
 
@@ -117,13 +124,4 @@ def download():
 
 @app.route("/status")
 def status():
-    """
-    Returns live status for the UI to poll.
-    """
     return jsonify(CURRENT_STATUS)
-
-
-# ------------------------------------------------------------
-# Run the app
-# ------------------------------------------------------------
-

@@ -22,11 +22,7 @@ def extract_jav_code(filename):
     """
 
     # Try bracketed first: [ABW-255]
-    m = re.search(r"
-
-\[([A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?)\]
-
-", filename)
+    m = re.search(r"\[([A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?)\]", filename)
     if m:
         return m.group(1)
 

@@ -2,7 +2,6 @@ import os
 import threading
 from flask import Flask, jsonify, render_template, request
 
-# Import your existing backend logic
 from downloader import (
     scan_videos,
     download_subtitle_from_subtitlecat
@@ -10,28 +9,17 @@ from downloader import (
 
 app = Flask(__name__)
 
-# Global status object shared with the UI
 CURRENT_STATUS = {
     "videos": [],
     "finished": True
 }
 
-
-# ------------------------------------------------------------
-# Wrapper for per-video processing (UI-friendly)
-# ------------------------------------------------------------
-    def process_single_video(video):
+def process_single_video(video):
     # Skip if subtitle already exists
     if video.get("has_sub"):
         video["status"] = "success"
         video["log"].append("Subtitle already exists. Skipped.")
         return True
-        
-    """
-    Wraps your existing downloader logic so the UI can track:
-    - status (success/failed/downloading)
-    - per-video logs
-    """
 
     code = video["code"]
     file = video["file"]
@@ -59,7 +47,6 @@ CURRENT_STATUS = {
 
     video["log"].append(f"Saved to {srt_path}")
     return True
-
 
 # ------------------------------------------------------------
 # Routes

@@ -1,6 +1,6 @@
-# Subtitle Downloader (Web UI)
-A lightweight web application that scans a video directory, extracts JAV codes, downloads English subtitles from SubtitleCat, and saves them as .en.srt files.
-Includes a modern glass‑morphism UI with real‑time logs and progress tracking.
+# JAV Subtitle Downloader
+A  web application that scans a video directory, extracts JAV codes, downloads English subtitles from SubtitleCat, and saves them as .en.srt files.
+Includes real‑time logs and progress tracking.
 
 ## Features
 * Automatic JAV code detection
@@ -37,20 +37,21 @@ services:
 
 1. Add a new Docker container
 
-Use the image:
+2. Use the image:
 ```
 ghcr.io/caldwell-41/jav-subs:latest
 ```
-Map your video directory:
+3. Map your video directory:
 ```
 /mnt/user/yourvideos → /videos
 ```
-Map port:
+4. Map port:
 ```
-8000 → 8000
+16969 → 16969
 ```
-Apply and start
-Visit:
+5. Apply and start
+6. 
+7. Visit:
 ```
 http://your-unraid-ip:8000
 ```

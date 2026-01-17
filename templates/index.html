@@ -1,93 +1,37 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-    <title>JAV Subtitle Downloader</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Subtitle Downloader</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<div class="container">
+<h2>Subtitle Downloader</h2>
 
-    <h1>JAV Subtitle Downloader</h1>
-
-    <!-- MAIN FORM -->
-    <form method="post" action="{{ url_for('start') }}">
-
-        <label>Root video folder:</label>
-        <input type="text" name="root_dir" value="{{ root_dir }}" required>
-
-        <label>
-            <input type="checkbox" name="multithread" checked>
-            Use multithreading
-        </label>
-
-        <label>Max threads:</label>
-        <input type="number" name="max_threads" value="10" min="1" max="64">
-
-        <label>
-            <input type="checkbox" name="test_mode">
-            Test Mode (no files written)
-        </label>
-
-        <label>
-            <input type="checkbox" name="include_existing_subs">
-            Include files that already have subtitles
-        </label>
-
-        <button class="btn" type="submit">Start Download</button>
-
-        <button class="btn btn-secondary" formaction="{{ url_for('preview') }}">
-            Preview Scan
-        </button>
-    </form>
-
-    <!-- STATUS PANEL -->
-    <h2>Status</h2>
-    <div id="status-panel">
-        <p>Total: <span id="s-total">0</span></p>
-        <p>Processed: <span id="s-processed">0</span></p>
-        <p>Downloaded: <span id="s-downloaded">0</span></p>
-        <p>Failed: <span id="s-failed">0</span></p>
-    </div>
-
-    <!-- LOGS -->
-    <h2>Logs</h2>
-    <form method="get" action="{{ url_for('index') }}">
-        <button class="btn btn-secondary" type="submit">Refresh Logs</button>
-    </form>
-
-    <textarea readonly>{{ logs }}</textarea>
-
-    <!-- FOOTER -->
-    <footer class="footer">
-        Build: {{ build_sha }}
-    </footer>
-
+<!-- Progress Bar -->
+<div id="progressContainer">
+    <div id="progressBar"></div>
 </div>
 
-<!-- LOADING OVERLAY -->
-<div id="loading" class="loading hidden">Working...</div>
+<div class="controls">
+    <button id="scanBtn">Scan</button>
+    <button id="downloadBtn" disabled>Download</button>
+</div>
 
-<script>
-/* STATUS POLLING */
-setInterval(() => {
-    fetch("/status")
-        .then(r => r.json())
-        .then(s => {
-            document.getElementById("s-total").textContent = s.total;
-            document.getElementById("s-processed").textContent = s.processed;
-            document.getElementById("s-downloaded").textContent = s.downloaded;
-            document.getElementById("s-failed").textContent = s.failed;
-        });
-}, 1000);
+<table id="videoTable">
+    <thead>
+        <tr>
+            <th>Video</th>
+            <th>Code</th>
+            <th>Has Subtitle</th>
+            <th>Status</th>
+            <th>Log</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
 
-/* BUTTON FEEDBACK */
-document.querySelectorAll("button").forEach(btn => {
-    btn.addEventListener("click", () => {
-        document.getElementById("loading").classList.remove("hidden");
-    });
-});
-</script>
-
+<script src="/static/app.js"></script>
+    
 </body>
 </html>

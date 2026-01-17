@@ -1,126 +1,136 @@
 import os
-import time
-import logging
-from logging.handlers import RotatingFileHandler
+import threading
+from flask import Flask, jsonify, render_template, request
 
-from flask import Flask, render_template, request, redirect, url_for, jsonify
-from downloader import run_downloader, scan_videos
+# Import your existing backend logic
+from downloader import (
+    scan_videos,
+    download_subtitle_from_subtitlecat
+)
 
 app = Flask(__name__)
 
-LOG_FILE = "jav_subtitle_downloader.log"
-BUILD_SHA = os.environ.get("BUILD_SHA", "unknown")[:7]
-
-STATUS = {
-    "total": 0,
-    "processed": 0,
-    "downloaded": 0,
-    "failed": 0,
-    "running": False,
-    "start_time": None
+# Global status object shared with the UI
+CURRENT_STATUS = {
+    "videos": [],
+    "finished": True
 }
 
 
-def setup_logging():
-    handler = RotatingFileHandler(
-        LOG_FILE,
-        maxBytes=5 * 1024 * 1024,  # 5 MB
-        backupCount=3
-    )
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    handler.setFormatter(formatter)
+# ------------------------------------------------------------
+# Wrapper for per-video processing (UI-friendly)
+# ------------------------------------------------------------
+def process_single_video(video):
+    """
+    Wraps your existing downloader logic so the UI can track:
+    - status (success/failed/downloading)
+    - per-video logs
+    """
 
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    code = video["code"]
+    file = video["file"]
 
-    # Avoid adding multiple handlers if reloaded
-    if not any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
-        root_logger.addHandler(handler)
+    if not code:
+        video["log"].append("No JAV code found.")
+        return False
 
+    video["log"].append(f"Searching SubtitleCat for {code}...")
 
-setup_logging()
-logger = logging.getLogger(__name__)
+    sub = download_subtitle_from_subtitlecat(code)
 
+    if not sub:
+        video["log"].append("No subtitle found.")
+        return False
 
-@app.route("/", methods=["GET"])
-def index():
-    root_dir = os.environ.get("VIDEO_ROOT_DIR", "/videos")
-
-    logs = ""
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
-            logs = f.read()
-
-    return render_template(
-        "index.html",
-        root_dir=root_dir,
-        logs=logs,
-        build_sha=BUILD_SHA
-    )
-
-
-@app.route("/preview", methods=["POST"])
-def preview():
-    root_dir = request.form.get("root_dir")
-    include_existing = request.form.get("include_existing_subs") == "on"
-
-    logger.info(f"Preview requested for root_dir={root_dir}, include_existing={include_existing}")
-
-    files = scan_videos(root_dir, include_existing=include_existing)
-
-    return render_template(
-        "preview.html",
-        files=files,
-        root_dir=root_dir,
-        build_sha=BUILD_SHA
-    )
-
-
-@app.route("/start", methods=["POST"])
-def start():
-    root_dir = request.form.get("root_dir")
-    multithread = request.form.get("multithread") == "on"
-    max_threads = int(request.form.get("max_threads") or 10)
-    test_mode = request.form.get("test_mode") == "on"
-    include_existing = request.form.get("include_existing_subs") == "on"
-
-    logger.info(
-        f"Download started: root_dir={root_dir}, multithread={multithread}, "
-        f"max_threads={max_threads}, test_mode={test_mode}, include_existing={include_existing}"
-    )
-
-    STATUS.update({
-        "total": 0,
-        "processed": 0,
-        "downloaded": 0,
-        "failed": 0,
-        "running": True,
-        "start_time": time.time()
-    })
+    srt_path = os.path.splitext(file)[0] + ".srt"
 
     try:
-        run_downloader(
-            root_dir,
-            use_multithreading=multithread,
-            max_threads=max_threads,
-            test_mode=test_mode,
-            include_existing=include_existing,
-            status=STATUS
-        )
+        with open(srt_path, "wb") as f:
+            f.write(sub)
     except Exception as e:
-        logger.exception(f"Error during download run: {e}")
-    finally:
-        STATUS["running"] = False
-        logger.info("Download run finished")
+        video["log"].append(f"Failed to save subtitle: {e}")
+        return False
 
-    return redirect(url_for("index"))
+    video["log"].append(f"Saved to {srt_path}")
+    return True
+
+
+# ------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/scan")
+def scan():
+    """
+    Scans the directory and returns the list of videos.
+    """
+    global CURRENT_STATUS
+
+    # Change this to your actual video directory
+    VIDEO_DIR = "/videos"
+
+    videos = scan_videos(VIDEO_DIR, include_existing=True)
+
+    CURRENT_STATUS = {
+        "videos": [
+            {
+                "file": v["file"],
+                "code": v["code"],
+                "has_sub": v["has_sub"],
+                "status": "",
+                "log": []
+            }
+            for v in videos
+        ],
+        "finished": True
+    }
+
+    return jsonify({"videos": CURRENT_STATUS["videos"]})
+
+
+@app.route("/download", methods=["POST"])
+def download():
+    """
+    Starts background download thread.
+    """
+    global CURRENT_STATUS
+    CURRENT_STATUS["finished"] = False
+
+    def run():
+        for i, v in enumerate(CURRENT_STATUS["videos"]):
+            CURRENT_STATUS["videos"][i]["status"] = "downloading"
+            CURRENT_STATUS["videos"][i]["log"].append("Starting download...")
+
+            ok = process_single_video(CURRENT_STATUS["videos"][i])
+
+            if ok:
+                CURRENT_STATUS["videos"][i]["status"] = "success"
+                CURRENT_STATUS["videos"][i]["log"].append("Success!")
+            else:
+                CURRENT_STATUS["videos"][i]["status"] = "failed"
+                CURRENT_STATUS["videos"][i]["log"].append("Failed.")
+
+        CURRENT_STATUS["finished"] = True
+
+    threading.Thread(target=run).start()
+
+    return jsonify({"ok": True})
 
 
 @app.route("/status")
 def status():
-    return jsonify(STATUS)
+    """
+    Returns live status for the UI to poll.
+    """
+    return jsonify(CURRENT_STATUS)
 
 
-@app.route("/health")
-def health():
-    return "OK", 200
+# ------------------------------------------------------------
+# Run the app
+# ------------------------------------------------------------
+

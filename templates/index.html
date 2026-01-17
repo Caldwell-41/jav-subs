@@ -6,13 +6,15 @@
 </head>
 <body>
 
+<div class="container">
+
     <h1>JAV Subtitle Downloader</h1>
 
     <form method="post" action="{{ url_for('start') }}">
         <label>Root video folder (inside container):</label>
-        <input type="text" name="root_dir" size="60" value="{{ root_dir }}" required>
+        <input type="text" name="root_dir" value="{{ root_dir }}" required>
 
-        <label class="checkbox">
+        <label>
             <input type="checkbox" name="multithread" {% if multithread %}checked{% endif %}>
             Use multithreading
         </label>
@@ -26,10 +28,12 @@
     <h2>Logs</h2>
 
     <form method="get" action="{{ url_for('index') }}">
-        <button class="btn" type="submit">Refresh Logs</button>
+        <button class="btn btn-secondary" type="submit">Refresh Logs</button>
     </form>
 
     <textarea readonly>{{ logs }}</textarea>
+
+</div>
 
 </body>
 </html>

@@ -1,32 +1,23 @@
-name: Build and Publish Docker Image
+FROM python:3.12-slim
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libxml2-dev \
+    libxslt1-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+WORKDIR /app
 
-    permissions:
-      contents: read
-      packages: write
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+COPY app.py .
+COPY downloader.py .
+COPY templates ./templates
+COPY static ./static
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+ENV VIDEO_ROOT_DIR=/videos
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/jav:latest
+EXPOSE 16969
+
+CMD ["python", "app.py"]

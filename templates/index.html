@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+    <title>JAV Subtitle Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <h1>JAV Subtitle Downloader</h1>
+
+    <form method="post" action="{{ url_for('start') }}">
+        <label>Root video folder (inside container):</label>
+        <input type="text" name="root_dir" size="60" value="{{ root_dir }}" required>
+
+        <label class="checkbox">
+            <input type="checkbox" name="multithread" {% if multithread %}checked{% endif %}>
+            Use multithreading
+        </label>
+
+        <label>Max threads:</label>
+        <input type="number" name="max_threads" value="{{ max_threads }}" min="1" max="64">
+
+        <button class="btn" type="submit">Start Download</button>
+    </form>
+
+    <h2>Logs</h2>
+
+    <form method="get" action="{{ url_for('index') }}">
+        <button class="btn" type="submit">Refresh Logs</button>
+    </form>
+
+    <textarea readonly>{{ logs }}</textarea>
+
+</body>
+</html>

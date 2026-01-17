@@ -3,36 +3,171 @@ import time
 import threading
 import re
 import logging
+import requests
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+BASE_URL = "https://www.subtitlecat.com"
 
+# Limit concurrent network calls to avoid rate limiting
+NET_SEM = threading.Semaphore(3)
+
+# Cache to avoid re-downloading the same code multiple times
+SUB_CACHE = {}
+
+
+# ------------------------------------------------------------
+# JAV CODE EXTRACTION
+# ------------------------------------------------------------
 def extract_jav_code(filename):
     """
-    Extract a JAV-style code like FJIN-098 from the filename.
-    Handles prefixes like 'hhd800.com@FJIN-098'.
+    Extract JAV codes from messy filenames.
+    Supports:
+    - hhd800.com@FJIN-098
+    - [FJIN-098]
+    - FJIN-098
+    - FJIN 098
+    - FJIN_098
+    - FJIN-098A
     """
-    match = re.search(r"[A-Za-z0-9]{2,10}-\d{2,5}", filename)
-    code = match.group(0) if match else None
-    logger.debug(f"Extracted code from '{filename}': {code}")
-    return code
+    # Try bracketed first
+    m = re.search(r"
+
+\[([A-Za-z0-9]{2,10}[-_ ]?\d{2,5}[A-Za-z]?)\]
+
+", filename)
+    if m:
+        return m.group(1).replace(" ", "").replace("_", "-")
+
+    # General pattern
+    m = re.search(r"[A-Za-z0-9]{2,10}[-_ ]?\d{2,5}[A-Za-z]?", filename)
+    if m:
+        return m.group(0).replace(" ", "").replace("_", "-")
+
+    return None
 
 
+# ------------------------------------------------------------
+# SAFE NETWORK WRAPPER
+# ------------------------------------------------------------
+def safe_get(url, retries=3, timeout=10):
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code == 200:
+                return r
+        except Exception:
+            pass
+        time.sleep(1)
+    return None
+
+
+# ------------------------------------------------------------
+# SUBTITLECAT SCRAPER
+# ------------------------------------------------------------
+def download_subtitle_from_subtitlecat(code):
+    """
+    Downloads English subtitles for a JAV code from SubtitleCat.
+    Returns bytes or None.
+    """
+
+    # Cache hit
+    if code in SUB_CACHE:
+        logger.info(f"[SubtitleCat] Cache hit for {code}")
+        return SUB_CACHE[code]
+
+    with NET_SEM:  # limit concurrent requests
+        logger.info(f"[SubtitleCat] Searching for: {code}")
+
+        search_url = f"{BASE_URL}/index.php?search={code}"
+        r = safe_get(search_url)
+        if not r:
+            logger.warning(f"[SubtitleCat] Search failed for {code}")
+            return None
+
+        soup = BeautifulSoup(r.text, "lxml")
+        table = soup.find("table", class_="table sub-table")
+        if not table:
+            logger.warning(f"[SubtitleCat] No results table for {code}")
+            return None
+
+        rows = table.find("tbody").find_all("tr")
+        best_href = None
+        most_downloads = 0
+
+        # Pick best match
+        for row in rows[:20]:
+            a = row.find("a")
+            if not a:
+                continue
+
+            title = a.text.strip()
+            if code.lower() not in title.lower():
+                continue
+
+            cols = row.find_all("td")
+            try:
+                downloads = int(cols[-2].text.split()[0])
+            except Exception:
+                downloads = 0
+
+            if downloads > most_downloads:
+                most_downloads = downloads
+                best_href = a.get("href")
+
+        if not best_href:
+            logger.warning(f"[SubtitleCat] No matching subtitle for {code}")
+            return None
+
+        page_url = f"{BASE_URL}/{best_href}"
+        logger.info(f"[SubtitleCat] Best match: {page_url}")
+
+        r = safe_get(page_url)
+        if not r:
+            logger.warning(f"[SubtitleCat] Failed to load subtitle page for {code}")
+            return None
+
+        soup = BeautifulSoup(r.text, "lxml")
+        download_link = soup.find("a", id="download_en")
+        if not download_link:
+            logger.warning(f"[SubtitleCat] No EN subtitle link for {code}")
+            return None
+
+        href = download_link.get("href")
+        if not href:
+            logger.warning(f"[SubtitleCat] Missing href for {code}")
+            return None
+
+        final_url = f"{BASE_URL}{href}"
+        logger.info(f"[SubtitleCat] Downloading from: {final_url}")
+
+        r = safe_get(final_url)
+        if not r:
+            logger.warning(f"[SubtitleCat] Download failed for {code}")
+            return None
+
+        subtitle_bytes = r.content
+
+        # Validate content
+        if not subtitle_bytes or len(subtitle_bytes.strip()) < 10:
+            logger.warning(f"[SubtitleCat] Empty or invalid subtitle for {code}")
+            return None
+
+        SUB_CACHE[code] = subtitle_bytes
+        return subtitle_bytes
+
+
+# ------------------------------------------------------------
+# VIDEO SCANNING
+# ------------------------------------------------------------
 def scan_videos(root_dir, include_existing=False):
-    """
-    Walk the root_dir and return a list of video metadata:
-    {
-        "file": full_path,
-        "code": extracted_code or None,
-        "has_sub": True/False
-    }
-    """
     logger.info(f"Scanning videos in: {root_dir}, include_existing={include_existing}")
     results = []
 
     for root, dirs, files in os.walk(root_dir):
         for f in files:
-            if f.lower().endswith((".mp4", ".mkv", ".avi")):
+            if f.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
                 full = os.path.join(root, f)
                 code = extract_jav_code(f)
 
@@ -49,13 +184,10 @@ def scan_videos(root_dir, include_existing=False):
     return results
 
 
+# ------------------------------------------------------------
+# PROCESS SINGLE VIDEO
+# ------------------------------------------------------------
 def process_video(video, test_mode, status):
-    """
-    Process a single video:
-    - Skip if it already has subtitles (unless include_existing was handled earlier)
-    - In test mode, simulate success without writing files
-    - Otherwise, perform the real download (placeholder here)
-    """
     if video.get("has_sub"):
         logger.info(f"Skipping (subtitle exists): {video['file']}")
         return
@@ -65,22 +197,39 @@ def process_video(video, test_mode, status):
 
     try:
         if test_mode:
-            # Simulate a successful "download"
             time.sleep(0.1)
             status["downloaded"] += 1
             logger.info(f"[TEST MODE] Marked as downloaded: {video['file']}")
             return
 
-        # TODO: replace this with real subtitle download logic
-        time.sleep(1)
+        code = video.get("code")
+        if not code:
+            logger.warning(f"No JAV code found for {video['file']}")
+            status["failed"] += 1
+            return
+
+        subtitle_bytes = download_subtitle_from_subtitlecat(code)
+
+        if not subtitle_bytes:
+            status["failed"] += 1
+            return
+
+        srt_path = os.path.splitext(video["file"])[0] + ".srt"
+
+        with open(srt_path, "wb") as f:
+            f.write(subtitle_bytes)
+
         status["downloaded"] += 1
-        logger.info(f"Downloaded subtitles for: {video['file']}")
+        logger.info(f"Saved subtitle: {srt_path}")
 
     except Exception as e:
         status["failed"] += 1
         logger.exception(f"Failed processing {video['file']}: {e}")
 
 
+# ------------------------------------------------------------
+# MAIN DOWNLOADER
+# ------------------------------------------------------------
 def run_downloader(
     root_dir,
     use_multithreading=True,
@@ -89,13 +238,6 @@ def run_downloader(
     include_existing=False,
     status=None
 ):
-    """
-    Main entry point for the downloader.
-    - Scans videos
-    - Filters out those that already have subtitles (unless include_existing=True)
-    - Processes remaining videos (optionally multithreaded)
-    - Updates the shared status dict
-    """
     if status is None:
         status = {
             "total": 0,
@@ -122,7 +264,7 @@ def run_downloader(
     status["total"] = len(videos)
 
     if not videos:
-        logger.info("No videos to process after filtering. Exiting run_downloader.")
+        logger.info("No videos to process after filtering.")
         return
 
     if use_multithreading:

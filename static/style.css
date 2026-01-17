@@ -94,3 +94,47 @@ textarea {
 .hidden {
     display: none;
 }
+
+/* Filter bar */
+.filter-bar {
+    margin: 20px 0;
+    display: flex;
+    gap: 10px;
+}
+
+.filter-btn {
+    padding: 8px 14px;
+    background: #30363d;
+    border: none;
+    border-radius: 6px;
+    color: #e6edf3;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.filter-btn:hover {
+    background: #484f58;
+}
+
+/* Highlight missing subtitles */
+.missing-sub {
+    background: rgba(255, 80, 80, 0.15);
+}
+
+/* Badges */
+.badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.badge-ok {
+    background: #238636;
+    color: white;
+}
+
+.badge-missing {
+    background: #da3633;
+    color: white;
+}
+

@@ -20,14 +20,18 @@ def safe_get(url, retries=3, timeout=10):
     return None
 
 
-def find_best_result_href(search_url, code):
+def find_best_result_href(search_url, code, log):
+    log.append(f"[SubCat] Searching: {search_url}")
+
     r = safe_get(search_url)
     if not r:
+        log.append("[SubCat] Request failed")
         return None
 
     soup = BeautifulSoup(r.text, "lxml")
     table = soup.find("table", class_="table sub-table")
     if not table:
+        log.append("[SubCat] No results table found")
         return None
 
     rows = table.find("tbody").find_all("tr")
@@ -54,30 +58,45 @@ def find_best_result_href(search_url, code):
         except Exception:
             downloads = 0
 
+        log.append(f"[SubCat] Candidate: '{title}' ({downloads} downloads)")
+
         if downloads > most_downloads:
             most_downloads = downloads
             best_href = a.get("href")
 
+    if best_href:
+        log.append(f"[SubCat] Best match → {best_href}")
+    else:
+        log.append("[SubCat] No matching titles found")
+
     return best_href
 
 
-def get_english_download_href(page_url):
+def get_english_download_href(page_url, log):
+    log.append(f"[SubCat] Loading subtitle page: {page_url}")
+
     r = safe_get(page_url)
     if not r:
+        log.append("[SubCat] Failed to load subtitle page")
         return None
 
     soup = BeautifulSoup(r.text, "lxml")
     a = soup.find("a", id="download_en")
+
     if not a:
+        log.append("[SubCat] No English subtitle link found")
         return None
 
-    return a.get("href")
+    href = a.get("href")
+    log.append(f"[SubCat] English subtitle link → {href}")
+    return href
 
 
 def get_subtitle(jav_code, log):
     search_url = f"{BASE_URL}/index.php?search={jav_code}"
 
-    page_href = find_best_result_href(search_url, jav_code)
+    # 1. Find best result
+    page_href = find_best_result_href(search_url, jav_code, log)
     if not page_href:
         return None
 
@@ -86,7 +105,8 @@ def get_subtitle(jav_code, log):
 
     page_url = BASE_URL + page_href
 
-    href = get_english_download_href(page_url)
+    # 2. Get English subtitle link
+    href = get_english_download_href(page_url, log)
     if not href:
         return None
 
@@ -94,10 +114,15 @@ def get_subtitle(jav_code, log):
         href = "/" + href
 
     final_url = BASE_URL + href
+    log.append(f"[SubCat] Downloading: {final_url}")
 
+    # 3. Download subtitle
     r = safe_get(final_url)
     if not r:
+        log.append("[SubCat] Failed to download subtitle")
         return None
+
+    log.append("[SubCat] Download successful")
 
     return {
         "content": r.content,

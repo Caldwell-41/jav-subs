@@ -7,7 +7,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from providers import avsubtitles  # NEW
-# SubtitleCat logic remains fully intact below
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +16,9 @@ SUB_CACHE = {}
 
 
 # ------------------------------------------------------------
-# JAV CODE EXTRACTION (kept from your improved version)
+# JAV CODE EXTRACTION
 # ------------------------------------------------------------
 def extract_jav_code(filename):
-    """
-    Extract JAV codes from messy filenames.
-    """
-
-    # Try bracketed first: [ABW-255]
     m = re.search(r"
 
 \[([A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?)\]
@@ -33,7 +27,6 @@ def extract_jav_code(filename):
     if m:
         return m.group(1)
 
-    # General JAV code pattern
     matches = re.findall(r"[A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?", filename)
     if matches:
         return matches[-1]
@@ -42,7 +35,7 @@ def extract_jav_code(filename):
 
 
 # ------------------------------------------------------------
-# SAFE GET (critical fix: status_code)
+# SAFE GET
 # ------------------------------------------------------------
 def safe_get(url, retries=3, timeout=10):
     for attempt in range(retries):
@@ -57,7 +50,7 @@ def safe_get(url, retries=3, timeout=10):
 
 
 # ------------------------------------------------------------
-# ORIGINAL MATCHING LOGIC (faithfully restored)
+# SUBTITLECAT SEARCH LOGIC
 # ------------------------------------------------------------
 def find_best_result_href(search_url, code):
     r = safe_get(search_url)
@@ -100,9 +93,6 @@ def find_best_result_href(search_url, code):
     return best_href
 
 
-# ------------------------------------------------------------
-# ORIGINAL ENGLISH SUBTITLE LINK LOGIC
-# ------------------------------------------------------------
 def get_english_download_href(page_url):
     r = safe_get(page_url)
     if not r:
@@ -116,17 +106,12 @@ def get_english_download_href(page_url):
     return a.get("href")
 
 
-# ------------------------------------------------------------
-# MAIN SUBTITLECAT SCRAPER (faithful to original)
-# ------------------------------------------------------------
 def download_subtitle_from_subtitlecat(code):
     if code in SUB_CACHE:
-        logger.info(f"[SubtitleCat] Cache hit for {code}")
         return SUB_CACHE[code]
 
     with NET_SEM:
         search_url = f"{BASE_URL}/index.php?search={code}"
-        logger.info(f"[SubtitleCat] Searching: {search_url}")
 
         attempts = 0
         page_href = None
@@ -138,29 +123,24 @@ def download_subtitle_from_subtitlecat(code):
                 time.sleep(1)
 
         if not page_href:
-            logger.warning(f"[SubtitleCat] No matching subtitle for {code}")
             return None
 
         if not page_href.startswith("/"):
             page_href = "/" + page_href
 
         page_url = BASE_URL + page_href
-        logger.info(f"[SubtitleCat] Best result page: {page_url}")
 
         href = get_english_download_href(page_url)
         if not href:
-            logger.warning(f"[SubtitleCat] No English subtitle link for {code}")
             return None
 
         if not href.startswith("/"):
             href = "/" + href
 
         final_url = BASE_URL + href
-        logger.info(f"[SubtitleCat] Downloading: {final_url}")
 
         r = safe_get(final_url)
         if not r:
-            logger.warning(f"[SubtitleCat] Failed to download subtitle for {code}")
             return None
 
         result = {
@@ -174,19 +154,9 @@ def download_subtitle_from_subtitlecat(code):
 
 
 # ------------------------------------------------------------
-# NEW: Unified provider chain (AVSubtitles → SubtitleCat)
+# NEW: Unified provider chain
 # ------------------------------------------------------------
 def download_subtitle(jav_code, log):
-    """
-    New unified provider chain.
-    Returns:
-        {
-            "content": b"...",
-            "source": "url",
-            "provider": "avsubtitles" | "subtitlecat"
-        }
-    """
-
     log.append(f"[System] Searching subtitles for {jav_code}")
 
     # 1. Try AVSubtitles first
@@ -214,7 +184,7 @@ def download_subtitle(jav_code, log):
 
 
 # ------------------------------------------------------------
-# VIDEO SCANNING (unchanged)
+# VIDEO SCANNING
 # ------------------------------------------------------------
 def scan_videos(root_dir, include_existing=False):
     results = []
@@ -238,86 +208,3 @@ def scan_videos(root_dir, include_existing=False):
                 })
 
     return results
-
-
-# ------------------------------------------------------------
-# PROCESS SINGLE VIDEO (unchanged)
-# ------------------------------------------------------------
-def process_video(video, test_mode, status):
-    if video.get("has_sub"):
-        return
-
-    status["processed"] += 1
-
-    try:
-        if test_mode:
-            time.sleep(0.1)
-            status["downloaded"] += 1
-            return
-
-        code = video.get("code")
-        if not code:
-            status["failed"] += 1
-            return
-
-        subtitle_bytes = download_subtitle_from_subtitlecat(code)
-        if not subtitle_bytes:
-            status["failed"] += 1
-            return
-
-        srt_path = os.path.splitext(video["file"])[0] + ".srt"
-        with open(srt_path, "wb") as f:
-            f.write(subtitle_bytes)
-
-        status["downloaded"] += 1
-
-    except Exception:
-        status["failed"] += 1
-
-
-# ------------------------------------------------------------
-# MAIN DOWNLOADER (unchanged)
-# ------------------------------------------------------------
-def run_downloader(
-    root_dir,
-    use_multithreading=True,
-    max_threads=10,
-    test_mode=False,
-    include_existing=False,
-    status=None
-):
-    if status is None:
-        status = {
-            "total": 0,
-            "processed": 0,
-            "downloaded": 0,
-            "failed": 0,
-        }
-
-    videos = scan_videos(root_dir, include_existing=include_existing)
-
-    if not include_existing:
-        videos = [v for v in videos if not v["has_sub"]]
-
-    status["total"] = len(videos)
-
-    if use_multithreading:
-        threads = []
-        for v in videos:
-            t = threading.Thread(target=process_video, args=(v, test_mode, status))
-            threads.append(t)
-            t.start()
-
-            if len(threads) >= max_threads:
-                for t in threads:
-                    t.join()
-                threads = []
-
-        for t in threads:
-            t.join()
-
-    else:
-        for v in videos:
-            process_video(v, test_mode, status)
-
-    return status

@@ -19,11 +19,7 @@ SUB_CACHE = {}
 # JAV CODE EXTRACTION
 # ------------------------------------------------------------
 def extract_jav_code(filename):
-    m = re.search(r"
-
-\[([A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?)\]
-
-", filename)
+    m = re.search(r"\[([A-Za-z]{2,10}[-_]\d{2,5}[A-Za-z]?)\]", filename)
     if m:
         return m.group(1)
 

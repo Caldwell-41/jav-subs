@@ -1,28 +1,121 @@
-from flask import Flask, request, jsonify
 import os
-from downloader import download_subtitle
+import threading
+from flask import Flask, jsonify, render_template
+
+from downloader import (
+    scan_videos,
+    download_subtitle
+)
 
 app = Flask(__name__)
-VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
+
+# Global status shared with UI
+CURRENT_STATUS = {
+    "videos": [],
+    "finished": True
+}
+
+
+# ------------------------------------------------------------
+# Process a single video (UI-friendly wrapper)
+# ------------------------------------------------------------
+def process_single_video(video):
+    # Skip if subtitle already exists
+    if video.get("has_sub"):
+        video["status"] = "success"
+        video["log"].append("Subtitle already exists. Skipped.")
+        return True
+
+    code = video["code"]
+    file = video["file"]
+
+    if not code:
+        video["log"].append("No JAV code found.")
+        return False
+
+    video["log"].append(f"Searching for subtitles for {code}...")
+
+    # Unified provider chain (AVSubtitles → SubtitleCat)
+    result = download_subtitle(code, video["log"])
+
+    if not result:
+        video["log"].append("No subtitle found from any provider.")
+        return False
+
+    # Save as .en.srt
+    srt_path = os.path.splitext(file)[0] + ".en.srt"
+
+    try:
+        with open(srt_path, "wb") as f:
+            f.write(result["content"])
+    except Exception as e:
+        video["log"].append(f"Failed to save subtitle: {e}")
+        return False
+
+    video["log"].append(f"Saved to {srt_path}")
+    return True
+
+
+# ------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/scan")
+def scan():
+    global CURRENT_STATUS
+
+    VIDEO_DIR = "/videos"
+
+    videos = scan_videos(VIDEO_DIR, include_existing=True)
+
+    CURRENT_STATUS = {
+        "videos": [
+            {
+                "file": v["file"],
+                "code": v["code"],
+                "has_sub": v["has_sub"],
+                "status": "",
+                "log": []
+            }
+            for v in videos
+        ],
+        "finished": True
+    }
+
+    return jsonify({"videos": CURRENT_STATUS["videos"]})
 
 
 @app.route("/download", methods=["POST"])
 def download():
-    data = request.json
-    code = data.get("code")
-    file = data.get("file")
+    global CURRENT_STATUS
+    CURRENT_STATUS["finished"] = False
 
-    log = []
+    def run():
+        for i, v in enumerate(CURRENT_STATUS["videos"]):
+            CURRENT_STATUS["videos"][i]["status"] = "downloading"
+            CURRENT_STATUS["videos"][i]["log"].append("Starting download...")
 
-    result = download_subtitle(code, log)
+            ok = process_single_video(CURRENT_STATUS["videos"][i])
 
-    if not result:
-        return jsonify({"success": False, "log": log})
+            if ok:
+                CURRENT_STATUS["videos"][i]["status"] = "success"
+                CURRENT_STATUS["videos"][i]["log"].append("Success!")
+            else:
+                CURRENT_STATUS["videos"][i]["status"] = "failed"
+                CURRENT_STATUS["videos"][i]["log"].append("Failed.")
 
-    srt_path = os.path.splitext(file)[0] + ".en.srt"
-    with open(srt_path, "wb") as f:
-        f.write(result["content"])
+        CURRENT_STATUS["finished"] = True
 
-    log.append(f"Saved subtitle → {srt_path}")
+    threading.Thread(target=run).start()
 
-    return jsonify({"success": True, "log": log})
+    return jsonify({"ok": True})
+
+
+@app.route("/status")
+def status():
+    return jsonify(CURRENT_STATUS)

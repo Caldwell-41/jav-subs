@@ -121,10 +121,6 @@ def download_subtitle(info_url, log):
     subid = subid.get("value", "").strip()
     revid = revid.get("value", "").strip()
 
-    if not subid or not revid:
-        log.append("[AVSubs] Empty subid/revid")
-        return None
-
     download_url = f"{BASE_URL}download_sub.php?subid={subid}&revid={revid}"
     log.append(f"[AVSubs] Downloading subtitle: {download_url}")
 
